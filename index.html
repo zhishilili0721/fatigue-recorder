@@ -1,0 +1,1127 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><link rel="icon" href="data:,"><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>疲労実験レコーダー</title>
+<style>
+/* Layout: setup card → (status bar, step list | current step) → saved sessions. Navy palette from the lab slides. */
+:root {
+  --bg: #F4F7FA; --surface: #FFFFFF; --ink: #1F2B35; --muted: #607181; --line: #D5DEE6;
+  --navy: #254D70; --pale: #EAF2F8; --accent: #2F6F9F; --done: #2E7D57; --warn: #B4542F; --on: #FFFFFF;
+  --pvt-bg: #11181F; --pvt-fg: #FF5A4A;
+  --font: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F161C; --surface: #17212A; --ink: #E3EAF0; --muted: #98A8B5; --line: #2B3A46;
+    --navy: #4C8BC2; --pale: #1C2C3A; --accent: #6FA6D6; --done: #5CC08C; --warn: #E58A63; --on: #FFFFFF;
+    --pvt-bg: #05080B; --pvt-fg: #FF6B5C; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F161C; --surface: #17212A; --ink: #E3EAF0; --muted: #98A8B5; --line: #2B3A46;
+  --navy: #4C8BC2; --pale: #1C2C3A; --accent: #6FA6D6; --done: #5CC08C; --warn: #E58A63; --on: #FFFFFF;
+  --pvt-bg: #05080B; --pvt-fg: #FF6B5C; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font); }
+[hidden] { display: none !important; }
+.app { max-width: 1120px; margin: 0 auto; display: grid; gap: 14px; padding-block: 18px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+h1 { margin: 0; font-size: 22px; color: var(--navy); }
+.hdr-sub { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.clock { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.clock b { font-size: 20px; color: var(--ink); font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; min-width: 0; }
+h2 { margin: 0 0 12px; font-size: 17px; color: var(--navy); }
+label.fld { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+input[type="text"], input[type="number"] { font: inherit; font-size: 16px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; box-sizing: border-box; }
+.setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); color: var(--muted); font: inherit; font-size: 15px; padding: 8px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--pale); color: var(--navy); font-weight: 700; }
+.btn { font: inherit; font-size: 15px; border-radius: 8px; padding: 9px 16px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--navy); border-color: var(--navy); color: var(--on); font-weight: 700; }
+.btn-big { font-size: 18px; padding: 12px 26px; }
+.btn-quiet { background: transparent; color: var(--muted); }
+button:focus-visible, input:focus-visible, .vas-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin: 10px 0 0; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.statusbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.statusbar .lbl { font-size: 13px; color: var(--muted); }
+.st { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; }
+.st[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: var(--on); font-weight: 700; }
+.st.alert[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); }
+.st-since { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+
+.run-grid { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 820px) { .run-grid { grid-template-columns: minmax(0, 1fr); } .steps { order: 2; } }
+.steps ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 13.5px; color: var(--muted); }
+.steps li .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); box-sizing: border-box; justify-self: center; }
+.steps li.done { color: var(--ink); } .steps li.done .dot { background: var(--done); border-color: var(--done); }
+.steps li.skip { text-decoration: line-through; }
+.steps li .tm.plan-t { color: var(--muted); font-weight: 400; }
+.plan { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 15px; color: var(--muted); }
+.plan b { color: var(--ink); font-weight: 600; }
+.steps li.cur { background: var(--pale); color: var(--navy); font-weight: 700; } .steps li.cur .dot { border-color: var(--navy); background: var(--navy); }
+.steps li .tm { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.steps .ph { font-size: 11px; letter-spacing: .08em; color: var(--muted); margin: 8px 8px 2px; }
+.steps .ph:first-child { margin-top: 0; }
+
+.stepcard { display: grid; gap: 14px; }
+.stephead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.chip { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--navy); color: var(--on); }
+.stepname { font-size: 26px; font-weight: 700; color: var(--ink); margin: 6px 0 0; }
+.stepmeta { font-family: var(--mono); font-size: 13px; color: var(--muted); text-align: right; line-height: 1.6; }
+.hint { font-size: 15px; line-height: 1.75; margin: 0; }
+.timer { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 56px; font-weight: 600; color: var(--navy); line-height: 1.1; }
+.timer small { font-size: 16px; color: var(--muted); font-weight: 500; margin-left: 8px; }
+.timer.over { color: var(--done); }
+.bar { position: relative; height: 12px; background: var(--pale); border-radius: 6px; overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--navy); border-radius: 6px; }
+.bar b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--surface); }
+.marks { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.mark { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-family: var(--mono); }
+.mark.done { border-color: var(--done); color: var(--done); }
+.banner { padding: 10px 14px; border-radius: 8px; background: var(--pale); color: var(--navy); font-weight: 700; font-size: 15px; }
+.banner.go { background: var(--done); color: var(--on); }
+.actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+
+.q { display: grid; gap: 8px; }
+.q h3 { margin: 0; font-size: 15px; color: var(--ink); }
+.kss { display: grid; gap: 4px; }
+.kss button { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; align-items: center; text-align: left; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.kss button b { font-family: var(--mono); font-size: 16px; color: var(--navy); text-align: center; }
+.kss button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: var(--on); }
+.kss button[aria-pressed="true"] b { color: var(--on); }
+.vas { display: grid; gap: 6px; }
+.vas-track { position: relative; height: 44px; cursor: pointer; touch-action: none; }
+.vas-track::before { content: ""; position: absolute; left: 0; right: 0; top: 21px; height: 2px; background: var(--ink); }
+.vas-track::after { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 18px; border-left: 2px solid var(--ink); border-right: 2px solid var(--ink); }
+.vas-mark { position: absolute; top: 8px; width: 4px; height: 28px; margin-left: -2px; background: var(--warn); border-radius: 2px; }
+.vas-ends { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); gap: 12px; }
+.tlx { display: grid; gap: 0; }
+.tlx-lead { font-size: 14.5px; line-height: 1.7; margin: 0 0 6px; }
+.tlx-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px 28px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.tlx-item:last-child { border-bottom: 0; }
+.tlx-title { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); text-align: center; }
+.tlx-desc { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.tlx-scale { position: relative; height: 40px; margin: 0 4px; cursor: pointer; touch-action: none; outline-offset: 4px; }
+.tlx-scale::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--ink); }
+.tlx-tick { position: absolute; bottom: 0; width: 2px; margin-left: -1px; height: 14px; background: var(--ink); }
+.tlx-tick.major { height: 30px; }
+.tlx-mark { position: absolute; bottom: 2px; width: 12px; height: 34px; margin-left: -6px; border-radius: 3px; background: var(--warn); opacity: .9; }
+.tlx-ends { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink); margin: 0 4px; }
+@media (min-width: 760px) {
+  .tlx-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .tlx-item .tlx-desc { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
+}
+.btn-danger { color: var(--warn); border-color: var(--warn); }
+.btn-danger-solid { background: var(--warn); border-color: var(--warn); color: var(--on); font-weight: 700; }
+
+.pvt { background: var(--pvt-bg); border-radius: 10px; min-height: 230px; display: grid; place-items: center; position: relative; user-select: none; -webkit-user-select: none; touch-action: manipulation; cursor: pointer; }
+.pvt .num { font-family: var(--mono); font-size: 76px; font-weight: 600; color: var(--pvt-fg); font-variant-numeric: tabular-nums; }
+.pvt .msg { color: #C9D4DD; font-size: 15px; text-align: center; line-height: 1.8; padding: 0 16px; }
+.pvt .rem { position: absolute; top: 10px; right: 14px; font-family: var(--mono); font-size: 13px; color: #8A99A6; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.summary div { background: var(--pale); border-radius: 8px; padding: 8px 10px; }
+.summary span { display: block; font-size: 12px; color: var(--muted); }
+.summary b { font-family: var(--mono); font-size: 20px; color: var(--ink); font-weight: 600; }
+
+.hist table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.hist th, .hist td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.hist th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+.hist td.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tablewrap { overflow-x: auto; }
+.pill { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pill.ok { border-color: var(--done); color: var(--done); }
+.save-state { font-size: 12.5px; color: var(--muted); }
+
+.modal { position: fixed; inset: 0; background: rgba(10, 16, 22, .55); display: grid; place-items: center; z-index: 20;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.modal .card { width: min(560px, 100%); max-height: 100%; overflow: auto; display: grid; gap: 14px; }
+textarea.out { width: 100%; box-sizing: border-box; min-height: 140px; font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.toast { position: fixed; top: max(14px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); background: var(--navy); color: var(--on); padding: 10px 20px; border-radius: 999px; font-weight: 700; font-size: 16px; z-index: 30; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); white-space: nowrap; }
+#bSound[aria-pressed="false"] { color: var(--warn); }
+.ex-btn[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: var(--on); font-weight: 700; }
+.expanel { display: grid; gap: 12px; border-color: var(--warn); margin-bottom: 14px; }
+.expanel h2 { color: var(--warn); margin: 0; }
+.ex-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; align-items: center; font-size: 14px; }
+@media (max-width: 560px) { .ex-row { grid-template-columns: minmax(0, 1fr); } }
+.ex-row .val { font-family: var(--mono); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.btn-sm { font-size: 13px; padding: 5px 10px; }
+.steps li.jump { cursor: pointer; } .steps li.jump:hover { background: var(--pale); }
+details.cfg { margin-top: 14px; } details.cfg summary { cursor: pointer; color: var(--navy); font-size: 14px; }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 10px; }
+.hold { position: relative; overflow: hidden; }
+.hold i { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--warn); transform: scaleX(0); transform-origin: left; }
+.hold.pressing i { transition: transform .8s linear; transform: scaleX(1); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header>
+    <div>
+      <h1>疲労実験レコーダー</h1>
+      <p class="hdr-sub" id="hdrSub">手順ごとの時刻と KSS・VAS・PVT・NASA-TLX を記録します</p>
+    </div>
+    <div class="row" style="align-items:flex-end"><div class="clock" id="clock"></div><button class="btn btn-quiet btn-sm" id="bSound" type="button" aria-pressed="true">音：オン</button><button class="btn btn-quiet btn-sm" id="bTest" type="button">テスト音</button><button class="btn btn-quiet btn-sm ex-btn hold" id="bExp" type="button" aria-pressed="false" title="長押しで実験者モード" hidden>実験者モード<i></i></button></div>
+  </header>
+
+  <!-- setup -->
+  <section class="card" id="setup">
+    <h2>実験の設定</h2>
+    <div class="setup-grid">
+      <label class="fld">被験者ID<input type="text" id="fSubject" placeholder="例：P01" autocomplete="off"></label>
+      <div class="fld"><span style="font-size:13px;color:var(--muted)">負荷</span>
+        <div class="seg" id="fLoad"><button type="button" data-v="高" aria-pressed="true">高負荷</button><button type="button" data-v="低" aria-pressed="false">低負荷</button></div></div>
+      <label class="fld">作業ブロック数（模擬日の中で繰り返す回数）<input type="number" id="fBlocks" min="1" max="5" value="2"></label>
+      <label class="fld">回数（この負荷条件の何日目か）<input type="number" id="fRep" min="1" max="20" value="1"></label>
+      <label class="fld">休憩時間（分・各ブロック共通，上限15分）<input type="number" id="fBrk" min="1" max="15" value="10"></label>
+    </div>
+    <div id="lowTargets" class="card" style="margin-top:12px;background:var(--pale);border-style:dashed" hidden>
+      <h2 style="font-size:15px">低負荷の目標時間（配対時長）</h2>
+      <p class="note" style="margin:0 0 10px">同じ被験者IDの直近の高負荷の記録があれば自動で読み込みます。見つからないブロックは「分:秒」で手動入力してください。</p>
+      <div class="setup-grid" id="lowTargetsGrid"></div>
+    </div>
+    <details class="cfg"><summary>手順の時間を変える（通常はこのまま）</summary>
+      <div class="cfg-grid">
+        <label class="fld">作業前の安静（分）<input type="number" id="cRest" min="1" max="30" value="5"></label>
+        <label class="fld">作業中の KSS・VAS の間隔（分）<input type="number" id="cEvery" min="5" max="60" value="20"></label>
+        <label class="fld">PVT の長さ（分）<input type="number" id="cPvt" min="1" max="10" value="1"></label>
+        <label class="fld">高負荷の作業上限（分）<input type="number" id="cMaxWork" min="30" max="180" value="120"></label>
+      </div>
+    </details>
+    <div class="row" style="margin-top:16px">
+      <button class="btn btn-primary btn-big" id="bStart" type="button">記録開始</button>
+      <span class="save-state" id="setupMsg"></span>
+    </div>
+    <p class="note">足首IMUと胸の心電の記録を始めたら「記録開始」を押してください。この時刻がすべての手順の基準になります。開始すると，各手順の開始時刻が自動で記録されます。</p>
+    <p class="note">高負荷は，疲れたと感じたらいつでも「疲れた→終了」ボタンで作業を終えられます（上限120分）。低負荷は，同じ被験者の直近の高負荷と同じ長さになったら終了してください。</p>
+    <p class="note">音の合図：作業開始（低い音1回）・作業中の KSS・VAS（2回）・作業終了（上がる音3回）・休憩終了（高い音3回）・PVT 終了（1回）。音と同時に画面上部にも表示されます。右上の「テスト音」で音量を確かめてください。</p>
+  </section>
+
+  <div id="resume" class="card" hidden>
+    <h2>途中の記録があります</h2>
+    <p class="hint" id="resumeText"></p>
+    <div class="row" style="margin-top:12px"><button class="btn btn-primary" id="bResume" type="button">続きから再開</button><button class="btn" id="bDiscard" type="button">破棄して新しく始める</button></div>
+  </div>
+
+  <!-- run -->
+  <section id="run" hidden>
+    <div class="card statusbar" style="margin-bottom:14px">
+      <span class="lbl">状態</span>
+      <div class="row" id="statusBtns"></div>
+      <span class="st-since" id="stSince"></span>
+    </div>
+    <section class="card expanel" id="exPanel" hidden></section>
+    <div class="run-grid">
+      <aside class="card steps"><ol id="stepList"></ol></aside>
+      <main class="card stepcard" id="stepCard"></main>
+    </div>
+  </section>
+
+  <!-- history -->
+  <section class="card hist" id="hist">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">保存された記録</h2>
+      <span class="save-state" id="dbState"></span>
+    </div>
+    <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>開始</th><th>被験者</th><th>条件</th><th>回</th><th>状態</th><th>CSV</th><th></th></tr></thead><tbody id="histBody"></tbody></table></div>
+    <p class="note" id="histNote"></p>
+  </section>
+</div>
+
+<div class="modal" id="modal" hidden><div class="card" id="modalCard"></div></div>
+<div class="toast" id="toast" role="status" aria-live="assertive" hidden></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const VERSION = 1;
+  const LS_CUR = "fatigueRec.current", LS_DONE = "fatigueRec.done";
+  const STATUSES = ["通常", "中断（離席・トイレ）", "会話", "センサ調整", "その他"];
+
+  /* ---------- protocol ---------- */
+  const DEFAULT_CFG = { rest: 5, every: 20, brk: 10, pvt: 1, maxWork: 120 };
+  const cfgOf = (meta) => ({ ...DEFAULT_CFG, ...((meta && meta.cfg) || {}) });
+  function buildSteps(meta) {
+    const c = cfgOf(meta), n = meta.blocks || 1, isLow = meta.load === "低";
+    const pvtHint = "数字が出たら，できるだけ早く画面をタップするかスペースキーを押します。";
+    const steps = [
+      { id: "walk1", name: "歩行①（校正・基準）", ph: "作業前", kind: "walk", hint: "" },
+      { id: "rest0", name: `安静 ${c.rest}分`, ph: "作業前", kind: "rest", target: { dur: c.rest * 60 }, hint: "座って安静にします。スマートフォンは見ません。この区間の心電を RMSSD の基準にします。" },
+      { id: "kv0", name: "KSS・VAS", ph: "作業前", kind: "kv", hint: "今の眠気と疲労感を答えます。" },
+      { id: "pvt0", name: `PVT ${c.pvt}分`, ph: "作業前", kind: "pvt", hint: pvtHint },
+    ];
+    for (let b = 1; b <= n; b++) {
+      const ph = n > 1 ? `ブロック${b}` : "作業";
+      const label = n > 1 ? String(b) : "";
+      const targetSec = isLow ? ((meta.lowTargets && meta.lowTargets[b - 1]) || 0) : c.maxWork * 60;
+      const targetMin = targetSec / 60;
+      const marks = []; for (let m = c.every; m < targetMin; m += c.every) marks.push(m);
+      steps.push({ id: `work${b}`, name: `作業${label}${isLow ? "" : "（疲れたら終了）"}`, ph, kind: "work", block: b, marks,
+        hint: isLow ? `同じ被験者の直近の高負荷ブロック${b}と同じ長さ（約${Math.round(targetMin)}分）になったら終了してください。` : "いつでも疲れたと感じたら「疲れた→終了」を押してください。上限120分になったら知らせます。" });
+      steps.push({ id: `kv1_${b}`, name: "KSS・VAS（作業直後）", ph, kind: "kv", hint: "作業が終わった直後の眠気と疲労感を答えます。続いて PVT、NASA-TLX を行い、その後に歩行②へ進みます。" });
+      steps.push({ id: `pvt1_${b}`, name: `PVT ${c.pvt}分`, ph, kind: "pvt", hint: pvtHint });
+      steps.push({ id: `tlx_${b}`, name: "NASA-TLX", ph, kind: "tlx", hint: "PVT ではなく，さきほどの作業について答えます。" });
+      steps.push({ id: `walk2_${b}`, name: `歩行②${label}`, ph, kind: "walk", hint: "PVT と NASA-TLX の回答後に行う歩行です。歩行①と同じように歩きます。" });
+      steps.push({ id: `rest1_${b}`, name: `休憩 ${c.brk}分`, ph, kind: "rest", target: { dur: c.brk * 60 }, hint: `座って休憩します（${c.brk}分）。終わったら VAS と歩行です。` });
+      steps.push({ id: `vasB_${b}`, name: "VAS（休憩後）", ph, kind: "vas", hint: "今の疲労感を答えます。" });
+      steps.push({ id: `walk3_${b}`, name: `歩行③${label}`, ph, kind: "walk", hint: "休憩後の歩行です。歩行①と同じように歩きます。" });
+      steps.push({ id: `pvt2_${b}`, name: `PVT ${c.pvt}分`, ph, kind: "pvt", hint: pvtHint });
+    }
+    steps.push({ id: "end", name: "終了", ph: "終了", kind: "end", hint: "センサの記録を止めてください。下のボタンでこの回の記録を CSV に保存できます。" });
+    return steps;
+  }
+  const KSS = [
+    [1, "非常にはっきり目覚めている"], [2, ""], [3, "目覚めている"], [4, ""], [5, "どちらでもない"],
+    [6, ""], [7, "眠い（起きているのに努力はいらない）"], [8, ""], [9, "とても眠い（起きているのに努力がいる，眠気と戦っている）"],
+  ];
+  const TLX = [
+    ["MD", "知的・知覚的要求", "小さい", "大きい", "考える，決める，計算する，覚える，見る，探すなど，頭や知覚をどのくらい使う必要がありましたか。作業は易しかったですか，難しかったですか。単純でしたか，複雑でしたか。正確さが厳しく求められましたか，多少のずれは許されましたか。"],
+    ["PD", "身体的要求", "小さい", "大きい", "押す，引く，回す，操作する，動き回るなど，体をどのくらい使う必要がありましたか。作業は楽でしたか，きつかったですか。ゆったりしていましたか，せわしなかったですか。休み休みできましたか，休みなく続きましたか。"],
+    ["TD", "タイムプレッシャー", "弱い", "強い", "作業のペースや，課題が次々に来ることによって，時間的な切迫感をどのくらい感じましたか。ペースはゆっくりでゆとりがありましたか，速くて慌ただしかったですか。"],
+    ["OP", "作業成績", "良い", "悪い", "自分（または指示した人）が決めた作業の目標を，どのくらい達成できたと思いますか。目標の達成について，自分の成績にどのくらい満足していますか。"],
+    ["EF", "努力", "少ない", "多い", "その成績を出すために，頭と体の両方で，どのくらい懸命に取り組む必要がありましたか。"],
+    ["FR", "フラストレーション", "低い", "高い", "作業中，不安，やる気の低下，いらだち，ストレス，不快感をどのくらい感じましたか。あるいは，安心感，満足感，充実感，くつろぎをどのくらい感じましたか。"],
+  ];
+
+  /* ---------- state ---------- */
+  let S = null;          // session state (persisted)
+  let steps = [];        // protocol for S.meta.blocks
+  let ui = {};           // transient per-step UI state (answers being edited)
+  let pvtRun = null;     // running PVT block
+  let audio = null, wake = null, db = null, downloads = null;
+  let expert = false;          // experimenter mode (not saved)
+  function workTotal() {
+    const st = steps[S.idx];
+    const adj = (S.adj && st && (S.adj[st.id] || 0)) || 0;
+    if (st && st.kind === "work" && S.meta.load === "低") return ((S.meta.lowTargets && S.meta.lowTargets[st.block - 1]) || 0) + adj;
+    return cfgOf(S.meta).maxWork * 60 + adj;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmtHMS = (s) => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`; };
+  const fmtMS = (s) => { const neg = s < 0; s = Math.abs(Math.floor(s)); return `${neg ? "−" : ""}${pad(Math.floor(s / 60))}:${pad(s % 60)}`; };
+  const localISO = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`; };
+  const clockHM = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  function lsGet(k) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } }
+
+  function log(ev, val = "", stepId) {
+    const st = steps[S.idx];
+    const id = stepId || (st ? st.id : "setup");
+    const name = stepId === "setup" ? "装着・記録開始" : (steps.find((x) => x.id === id) || {}).name || id;
+    S.events.push({ i: S.events.length + 1, t: Date.now(), step: id, name, ev, val: String(val) });
+    persist();
+  }
+
+  function enter(note = "") {
+    const id = steps[S.idx].id;
+    S.visit = S.visit || {}; S.visit[id] = (S.visit[id] || 0) + 1;
+    if (S.skipped) delete S.skipped[id];
+    log("start", note);
+  }
+  const visitKey = (id) => `${id}@v${(S.visit && S.visit[id]) || 0}`;
+
+  /* ---------- persistence ---------- */
+  let saveTimer = null, saving = false, saveAgain = false;
+  const deletedIds = new Set();   // sessions deleted in this view: never write them back
+  function persist() {
+    if (!S || deletedIds.has(S.meta.sessionId)) return;
+    lsSet(LS_CUR, S);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveRemote, 1200);
+  }
+  async function saveRemote() {
+    if (!db || !S || deletedIds.has(S.meta.sessionId)) return;
+    if (saving) { saveAgain = true; return; }
+    saving = true;
+    try {
+      await db.doc(`sessions/${S.meta.sessionId}`).set({ ...JSON.parse(JSON.stringify(S)), startedAt: S.meta.startedAt });
+      setDbState(`保存済み ${clockHM(Date.now())}`);
+    } catch (e) {
+      setDbState(e && e.code === "quota_exceeded" ? "保存先がいっぱいです。CSVで保存してください" : "保存に失敗しました（端末内には保存されています）");
+    } finally {
+      saving = false;
+      if (saveAgain) { saveAgain = false; saveRemote(); }
+    }
+  }
+  function setDbState(t) { $("dbState").textContent = t; }
+
+  /* ---------- audio / wake lock ---------- */
+  function initAudio() { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch { audio = null; } }
+  let soundOn = (() => { try { return localStorage.getItem("fatigueRec.sound") !== "off"; } catch { return true; } })();
+  const SOUNDS = {
+    start: { notes: [[520, 0.8]], text: "合図：作業開始" },
+    kv: { notes: [[880, 0.22], [880, 0.22]], text: "合図：KSS・VAS の時間です" },
+    end: { notes: [[660, 0.22], [880, 0.22], [1100, 0.4]], text: "合図：作業時間になりました" },
+    rest: { notes: [[1000, 0.18], [1000, 0.18], [1000, 0.18]], text: "合図：休憩の時間が終わりました" },
+    pvt: { notes: [[880, 0.25]], text: "合図：PVT が終わりました" },
+    test: { notes: [[660, 0.22], [880, 0.22]], text: "テスト音" },
+  };
+  let toastTimer = null;
+  function toast(text) { const t = $("toast"); t.textContent = text; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3500); }
+  function chime(kind, force = false) {
+    const def = SOUNDS[kind] || SOUNDS.test;
+    toast(soundOn || force ? def.text : `${def.text}（音はオフ）`);
+    if (!(soundOn || force)) return;
+    initAudio(); if (!audio) return;
+    let t0 = audio.currentTime + 0.02;
+    def.notes.forEach(([f, d]) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = f; o.type = "sine";
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+      o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + d + 0.02);
+      t0 += d + 0.12;
+    });
+  }
+  function renderSoundBtn() { const b = $("bSound"); b.setAttribute("aria-pressed", String(soundOn)); b.textContent = soundOn ? "音：オン" : "音：オフ"; }
+  $("bSound").addEventListener("click", () => { soundOn = !soundOn; try { localStorage.setItem("fatigueRec.sound", soundOn ? "on" : "off"); } catch { /* ignore */ } renderSoundBtn(); if (soundOn) chime("test"); });
+  $("bTest").addEventListener("click", () => chime("test", true));
+  renderSoundBtn();
+  async function keepAwake() { try { wake = await navigator.wakeLock?.request("screen"); } catch { wake = null; } }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S && !S.finished) keepAwake(); });
+
+  /* ---------- setup ---------- */
+  const setup = { load: "高" };
+  function bindSeg(id, key) {
+    $(id).querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+      setup[key] = b.dataset.v;
+      $(id).querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      if (key === "load") renderLowTargets();
+    }));
+  }
+  function renderLowTargets() {
+    const box = $("lowTargets"), grid = $("lowTargetsGrid");
+    if (setup.load !== "低") { box.hidden = true; return; }
+    box.hidden = false;
+    const n = Math.max(1, Math.min(5, parseInt($("fBlocks").value, 10) || 2));
+    const subj = $("fSubject").value.trim();
+    let detected = null;
+    if (subj) { try { detected = JSON.parse(localStorage.getItem(`fatigueRec.highBlocks.${subj}`) || "null"); } catch { detected = null; } }
+    grid.innerHTML = "";
+    for (let b = 1; b <= n; b++) {
+      const have = detected && detected[b] != null;
+      const lbl = document.createElement("label"); lbl.className = "fld";
+      lbl.innerHTML = `ブロック${b}の目標時間（分:秒）${have ? `<span style="color:var(--done)"> ・検出 ${fmtMS(detected[b])}</span>` : `<span style="color:var(--warn)"> ・記録なし，手動入力</span>`}<input type="text" id="lowT${b}" placeholder="例：42:10" value="${have ? fmtMS(detected[b]) : ""}">`;
+      grid.appendChild(lbl);
+    }
+  }
+  bindSeg("fLoad", "load");
+  $("fSubject").addEventListener("input", renderLowTargets);
+  $("fBlocks").addEventListener("input", renderLowTargets);
+  renderLowTargets();
+
+  $("bStart").addEventListener("click", () => {
+    const subject = $("fSubject").value.trim();
+    if (!subject) { $("setupMsg").textContent = "被験者IDを入力してください"; $("fSubject").focus(); return; }
+    const rep = Math.max(1, Math.min(20, parseInt($("fRep").value, 10) || 1));
+    const blocks = Math.max(1, Math.min(5, parseInt($("fBlocks").value, 10) || 2));
+    const num = (id, lo, hi, d) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
+    const cfg = { rest: num("cRest", 1, 30, 5), every: num("cEvery", 5, 60, 20), brk: num("fBrk", 1, 15, 10), pvt: num("cPvt", 1, 10, 1), maxWork: num("cMaxWork", 30, 180, 120) };
+    let lowTargets = null;
+    if (setup.load === "低") {
+      lowTargets = [];
+      for (let b = 1; b <= blocks; b++) {
+        const el = $("lowT" + b);
+        const raw = (el ? el.value : "").trim();
+        const mm = raw.match(/^(\d+):([0-5]?\d)$/);
+        const sec = mm ? (parseInt(mm[1], 10) * 60 + parseInt(mm[2], 10)) : (parseFloat(raw) > 0 ? Math.round(parseFloat(raw) * 60) : NaN);
+        if (!Number.isFinite(sec) || sec <= 0) { $("setupMsg").textContent = `ブロック${b}の目標時間を「分:秒」で入力してください`; el && el.focus(); return; }
+        lowTargets.push(sec);
+      }
+    }
+    const now = Date.now(), d = new Date(now);
+    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    S = {
+      meta: { sessionId: `${stamp}-${Math.random().toString(36).slice(2, 6)}`, subject, load: setup.load, blocks, lowTargets, rep, startedAt: now, version: VERSION, cfg },
+      idx: 0, events: [], pvt: [], answers: {}, workStart: null, workEnd: null, blockDur: {},
+      status: "通常", statusSince: now, fired: {}, finished: false, visit: {}, adj: {}, workRun: 0,
+    };
+    steps = buildSteps(S.meta);
+    initAudio(); keepAwake();
+    log("start", "", "setup");
+    enter();
+    showRun();
+  });
+
+  /* ---------- run view ---------- */
+  function showRun() {
+    $("setup").hidden = true; $("resume").hidden = true; $("run").hidden = false; $("bExp").hidden = false;
+    $("hdrSub").textContent = `被験者 ${S.meta.subject}　${S.meta.load}負荷・${S.meta.blocks}ブロック・休憩 ${cfgOf(S.meta).brk}分　${S.meta.rep}回目`;
+    renderStatus(); renderSteps(); renderStep();
+  }
+
+  function renderStatus() {
+    const box = $("statusBtns"); box.innerHTML = "";
+    STATUSES.forEach((s) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "st" + (s === "通常" ? "" : " alert"); b.textContent = s;
+      b.setAttribute("aria-pressed", String(S.status === s));
+      b.addEventListener("click", () => {
+        if (S.finished || S.status === s) return;
+        S.status = s; S.statusSince = Date.now(); log("status", s); renderStatus();
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function stepStart(i) {
+    const id = steps[i].id;
+    for (let k = S.events.length - 1; k >= 0; k--) if (S.events[k].step === id && S.events[k].ev === "start") return S.events[k].t;
+    return null;
+  }
+  function renderSteps() {
+    const ol = $("stepList"); ol.innerHTML = "";
+    let ph = "";
+    steps.forEach((st, i) => {
+      if (st.ph !== ph) { ph = st.ph; const h = document.createElement("li"); h.className = "ph"; h.style.display = "block"; h.textContent = ph; ol.appendChild(h); }
+      const li = document.createElement("li");
+      const t = i <= S.idx ? stepStart(i) : null;
+      const sk = S.skipped && S.skipped[st.id];
+      li.className = i < S.idx ? (t && !sk ? "done" : "skip") : i === S.idx ? "cur" : "";
+      let plan = null;
+      if (i === S.idx + 1) {
+        const cur = steps[S.idx];
+        if (cur.kind === "work" && S.workStart && !S.workEnd) plan = S.workStart + workTotal() * 1000;
+        if (cur.kind === "rest") { const r0 = stepStart(S.idx); if (r0) plan = r0 + (cur.target.dur + ((S.adj && S.adj[cur.id]) || 0)) * 1000; }
+      }
+      li.innerHTML = `<span class="dot"></span><span>${esc(st.name)}</span><span class="tm${!t && plan ? " plan-t" : ""}">${t ? clockHM(t) : plan ? "予定 " + clockHM(plan).slice(0, 5) : ""}</span>`;
+      if (expert && i !== S.idx) { li.classList.add("jump"); li.title = "この手順へ移動"; li.addEventListener("click", () => confirmJump(i)); }
+      ol.appendChild(li);
+    });
+  }
+
+  function answerSummary(v) {
+    if (!v) return "";
+    if (v.kind === "kv") return `KSS=${v.kss};VAS=${v.vas.toFixed(1)}`;
+    if (v.kind === "vas") return `VAS=${v.vas.toFixed(1)}`;
+    if (v.kind === "tlx") return TLX.map(([k]) => `${k}=${v[k]}`).join(";") + `;RTLX=${v.rtlx.toFixed(1)}`;
+    return "";
+  }
+
+  function renderStep() {
+    const st = steps[S.idx], card = $("stepCard");
+    ui = { kss: null, vas: null, tlx: {} };
+    if (pvtRun && pvtRun.step !== st.id) pvtRun = null;
+    const started = stepStart(S.idx);
+    card.innerHTML = `
+      <div class="stephead">
+        <div><span class="chip">${esc(st.ph)}</span><div class="stepname">${esc(st.name)}</div></div>
+        <div class="stepmeta">開始 ${started ? clockHM(started) : "—"}<br><span id="stepElapsed"></span></div>
+      </div>
+      ${st.hint ? `<p class="hint">${esc(st.hint)}</p>` : ""}
+      <div id="stepBody" class="stepcard"></div>
+      <div class="actions">
+        <button class="btn btn-quiet" id="bBack" type="button" ${S.idx === 0 ? "disabled" : ""}>1つ戻る</button>
+        <div class="row" id="actRight"></div>
+      </div>`;
+    const body = $("stepBody"), right = $("actRight");
+    const next = document.createElement("button");
+    next.type = "button"; next.className = "btn btn-primary btn-big"; next.id = "bNext";
+    next.textContent = st.kind === "end" ? "" : nextLabel(st);
+    if (st.kind !== "end") {
+      const sk = document.createElement("button");
+      sk.type = "button"; sk.className = "btn"; sk.id = "bSkip"; sk.textContent = "この手順をスキップ"; sk.hidden = !expert;
+      sk.addEventListener("click", () => advance(true));
+      right.appendChild(sk);
+      right.appendChild(next);
+    }
+
+    if (st.kind === "walk") {
+      body.innerHTML = `<div class="timer" id="tMain">00:00<small>経過</small></div>`;
+    } else if (st.kind === "rest") {
+      body.innerHTML = `<div class="timer" id="tMain"></div><div class="plan" id="tPlan"></div><div class="bar"><i id="tBar"></i></div><div id="tBanner"></div>`;
+    } else if (st.kind === "kv") {
+      body.appendChild(kssBlock((v) => { ui.kss = v; refreshNext(); }));
+      body.appendChild(vasBlock("精神的な疲労感", "まったく疲れていない", "これ以上ないほど疲れている", 0.1, (v) => { ui.vas = v; refreshNext(); }));
+    } else if (st.kind === "vas") {
+      body.appendChild(vasBlock("精神的な疲労感", "まったく疲れていない", "これ以上ないほど疲れている", 0.1, (v) => { ui.vas = v; refreshNext(); }));
+    } else if (st.kind === "tlx") {
+      const box = document.createElement("div"); box.className = "tlx";
+      const lead = document.createElement("p"); lead.className = "tlx-lead";
+      lead.textContent = "さきほどの作業の経験に最も近い位置を，各スケールの目盛りをクリックして選んでください。";
+      box.appendChild(lead);
+      TLX.forEach(([k, label, lo, hi, desc]) => box.appendChild(tlxBlock(label, lo, hi, desc, ui.tlx[k], (v) => { ui.tlx[k] = v; refreshNext(); })));
+      body.appendChild(box);
+    } else if (st.kind === "pvt") {
+      body.appendChild(pvtBlock(st));
+    } else if (st.kind === "work") {
+      const ms = st.marks.map((m) => `<span class="mark" data-m="${m}">${m}分 KSS・VAS</span>`).join("");
+      body.innerHTML = `<div class="timer" id="tMain"></div><div class="plan" id="tPlan"></div><div class="bar" id="workBar"><i id="tBar"></i></div>
+        ${ms ? `<div class="marks" id="marks">${ms}</div>` : ""}<div id="tBanner"></div>
+        <p class="note">${S.meta.load === "高" ? "高負荷：自分の研究に取り組みます。" : "低負荷：動画を見るなど，負荷の低い作業をします。"}${cfgOf(S.meta).every}分ごとに音が鳴り，KSS・VAS の入力画面が出ます。会話はしないでください。</p>`;
+      const bar = $("workBar");
+      st.marks.forEach((m) => { if (m * 60 >= workTotal()) return; const b = document.createElement("b"); b.style.left = `${((m * 60) / workTotal()) * 100}%`; bar.appendChild(b); });
+    } else if (st.kind === "end") {
+      body.innerHTML = `<div class="banner go">この回の記録は終わりです（記録開始から ${fmtHMS((stepStart(S.idx) - S.meta.startedAt) / 1000)}）</div>
+        <div class="row"><button class="btn btn-primary" id="bCsvE" type="button">手順・回答の CSV を保存</button><button class="btn btn-primary" id="bCsvP" type="button">PVT の CSV を保存</button><button class="btn" id="bNew" type="button">次の回を始める</button></div>
+        <div id="csvFallback"></div>`;
+      $("bCsvE").addEventListener("click", () => exportCsv(S, "events"));
+      $("bCsvP").addEventListener("click", () => exportCsv(S, "pvt"));
+      $("bNew").addEventListener("click", () => {
+        lsDel(LS_CUR); S = null; pvtRun = null; expert = false;
+        $("bExp").hidden = true; $("bExp").setAttribute("aria-pressed", "false"); $("exPanel").hidden = true;
+        $("run").hidden = true; $("setup").hidden = false; $("clock").textContent = "";
+        $("hdrSub").textContent = "手順ごとの時刻と KSS・VAS・PVT・NASA-TLX を記録します";
+        const r = $("fRep"); r.value = String(Math.min(20, (parseInt(r.value, 10) || 1) + 1));
+        renderLowTargets();
+        window.scrollTo(0, 0);
+      });
+    }
+    next.addEventListener("click", goNext);
+    $("bBack").addEventListener("click", goBack);
+    refreshNext(); tick(); renderExpert();
+  }
+  function nextLabel(st) {
+    const nx = steps[S.idx + 1];
+    if (st.kind === "work") return S.meta.load === "高" ? "疲れた → 終了" : "作業終了 → 次へ";
+    return nx ? `次へ：${nx.name}` : "次へ";
+  }
+  function refreshNext() {
+    const b = $("bNext"); if (!b) return;
+    const st = steps[S.idx];
+    let ok = true;
+    if (st.kind === "kv") ok = ui.kss != null && ui.vas != null;
+    if (st.kind === "vas") ok = ui.vas != null;
+    if (st.kind === "tlx") ok = TLX.every(([k]) => ui.tlx[k] != null);
+    if (st.kind === "pvt") ok = !!(pvtRun && pvtRun.done);
+    b.disabled = !ok;
+  }
+
+  function goNext() {
+    const st = steps[S.idx];
+    if (st.kind === "rest") {
+      const left = restLeft(st);
+      if (left > 5) {
+        openConfirm(`目標の時刻まで あと ${fmtMS(left)} あります。次へ進みますか？`, () => advance());
+        return;
+      }
+    }
+    advance();
+  }
+  function advance(skip = false) {
+    const st = steps[S.idx];
+    if (skip) {
+      if (pvtRun && pvtRun.step === st.id && !pvtRun.done && pvtRun.trials) {
+        cancelAnimationFrame(pvtRun.raf); pvtRun.done = true;
+        const sm = pvtSummary(pvtRun.trials);
+        S.pvt = S.pvt.filter((b) => b.step !== st.id);
+        S.pvt.push({ step: st.id, startedAt: pvtRun.wall0, trials: pvtRun.trials, summary: sm, aborted: true });
+        log("pvt_abort", `n=${sm.n};途中で中止`);
+      }
+      S.skipped = S.skipped || {}; S.skipped[st.id] = true;
+      log("skip", `${st.name} をスキップ`);
+      if (st.kind === "work") { S.workEnd = Date.now(); log("end", "作業終了（スキップ）"); S.blockDur = S.blockDur || {}; S.blockDur[st.block] = Math.round((S.workEnd - S.workStart) / 1000); }
+    }
+    if (!skip && st.kind === "kv") { const v = { kind: "kv", kss: ui.kss, vas: ui.vas }; S.answers[st.id] = v; log("answer", answerSummary(v)); }
+    if (!skip && st.kind === "vas") { const v = { kind: "vas", vas: ui.vas }; S.answers[st.id] = v; log("answer", answerSummary(v)); }
+    if (!skip && st.kind === "tlx") {
+      const v = { kind: "tlx", ...ui.tlx }; v.rtlx = TLX.reduce((a, [k]) => a + ui.tlx[k], 0) / TLX.length;
+      S.answers[st.id] = v; log("answer", answerSummary(v));
+    }
+    if (!skip && st.kind === "work") { S.workEnd = Date.now(); log("end", "作業終了"); S.blockDur = S.blockDur || {}; S.blockDur[st.block] = Math.round((S.workEnd - S.workStart) / 1000); }
+    S.idx = Math.min(steps.length - 1, S.idx + 1);
+    const nx = steps[S.idx];
+    if (nx.kind === "work") { S.workStart = Date.now(); S.workEnd = null; S.workRun = (S.workRun || 0) + 1; chime("start"); }
+    if (nx.kind === "end") { S.finished = true; try { wake?.release(); } catch { /* ignore */ } }
+    enter();
+    if (S.finished) archiveDone();
+    renderSteps(); renderStep();
+  }
+  function goBack() {
+    if (S.idx === 0) return;
+    openConfirm("1つ前の手順に戻ります。戻った手順は開始時刻を記録し直します。", () => {
+      const cur = steps[S.idx];
+      log("back", `${cur.name} から戻る`);
+      if (cur.kind === "end") S.finished = false;
+      S.idx -= 1;
+      const st = steps[S.idx];
+      if (st.kind === "work") { S.workEnd = null; }
+      if (cur.kind === "work") { S.workStart = null; }
+      if (st.kind === "pvt") pvtRun = null;
+      enter("やり直し");
+      renderSteps(); renderStep();
+    });
+  }
+
+  function restLeft(st) {
+    const now = Date.now(), a = (S.adj && S.adj[st.id]) || 0;
+    if (st.target.dur) return st.target.dur + a - (now - stepStart(S.idx)) / 1000;
+    if (st.target.sinceEnd && S.workEnd) return st.target.sinceEnd + a - (now - S.workEnd) / 1000;
+    return 0;
+  }
+
+  /* ---------- questionnaires ---------- */
+  function kssBlock(onChange) {
+    const q = document.createElement("div"); q.className = "q";
+    q.innerHTML = `<h3>KSS：今の眠気にいちばん近いものを選んでください</h3><div class="kss"></div>`;
+    const box = q.querySelector(".kss");
+    KSS.forEach(([n, label]) => {
+      const b = document.createElement("button"); b.type = "button"; b.setAttribute("aria-pressed", "false");
+      b.innerHTML = `<b>${n}</b><span>${esc(label)}</span>`;
+      b.addEventListener("click", () => { box.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); onChange(n); });
+      box.appendChild(b);
+    });
+    return q;
+  }
+  function vasBlock(title, lo, hi, step, onChange) {
+    const q = document.createElement("div"); q.className = "q vas";
+    q.innerHTML = `<h3>${esc(title)}</h3><div class="vas-track" tabindex="0" role="slider" aria-label="${esc(title)}" aria-valuemin="0" aria-valuemax="100"></div><div class="vas-ends"><span>${esc(lo)}</span><span>${esc(hi)}</span></div>`;
+    const track = q.querySelector(".vas-track");
+    let val = null, mark = null;
+    const set = (v) => {
+      v = Math.max(0, Math.min(100, step >= 1 ? Math.round(v / step) * step : Math.round(v * 10) / 10));
+      val = v;
+      if (!mark) { mark = document.createElement("div"); mark.className = "vas-mark"; track.appendChild(mark); }
+      mark.style.left = `${v}%`; track.setAttribute("aria-valuenow", String(v));
+      onChange(v);
+    };
+    const fromEvent = (e) => { const r = track.getBoundingClientRect(); set(((e.clientX - r.left) / r.width) * 100); };
+    let dragging = false;
+    track.addEventListener("pointerdown", (e) => { dragging = true; track.setPointerCapture(e.pointerId); fromEvent(e); });
+    track.addEventListener("pointermove", (e) => { if (dragging) fromEvent(e); });
+    track.addEventListener("pointerup", () => { dragging = false; });
+    track.addEventListener("keydown", (e) => {
+      const d = step >= 1 ? step : 1;
+      if (e.key === "ArrowRight") { e.preventDefault(); set((val ?? 50) + d); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); set((val ?? 50) - d); }
+    });
+    return q;
+  }
+
+  function tlxBlock(title, lo, hi, desc, initial, onChange) {
+    const q = document.createElement("div"); q.className = "tlx-item";
+    q.innerHTML = `<h3 class="tlx-title">${esc(title)}</h3><div class="tlx-scale" tabindex="0" role="slider" aria-label="${esc(title)}" aria-valuemin="0" aria-valuemax="100"></div><div class="tlx-ends"><span>${esc(lo)}</span><span>${esc(hi)}</span></div><p class="tlx-desc">${esc(desc)}</p>`;
+    const sc = q.querySelector(".tlx-scale");
+    for (let i = 0; i <= 20; i++) {
+      const t = document.createElement("div");
+      t.className = "tlx-tick" + (i % 2 === 0 ? " major" : "");
+      t.style.left = `${i * 5}%`;
+      sc.appendChild(t);
+    }
+    let val = null, mark = null;
+    const set = (v, silent) => {
+      v = Math.max(0, Math.min(100, Math.round(v / 5) * 5));
+      val = v;
+      if (!mark) { mark = document.createElement("div"); mark.className = "tlx-mark"; sc.appendChild(mark); }
+      mark.style.left = `${v}%`; sc.setAttribute("aria-valuenow", String(v));
+      if (!silent) onChange(v);
+    };
+    if (initial != null) set(initial, true);
+    sc.addEventListener("pointerdown", (e) => { const r = sc.getBoundingClientRect(); set(((e.clientX - r.left) / r.width) * 100); });
+    sc.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); set((val ?? 50) + 5); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); set((val ?? 50) - 5); }
+    });
+    return q;
+  }
+
+  /* ---------- PVT (3 min, ISI 1–4 s, lapse ≥355 ms, false start <100 ms) ---------- */
+  const LAPSE = 355, FS = 100, TIMEOUT = 30000;
+  function pvtBlock(st) {
+    const wrap = document.createElement("div"); wrap.className = "stepcard";
+    const area = document.createElement("div"); area.className = "pvt"; area.tabIndex = 0;
+    const res = document.createElement("div");
+    wrap.appendChild(area); wrap.appendChild(res);
+    const showIdle = () => { area.innerHTML = `<div class="msg">準備ができたら，この枠をタップするか<br>スペースキーを押して開始します（${cfgOf(S.meta).pvt}分間）</div>`; };
+    if (pvtRun && pvtRun.step === st.id && pvtRun.done) { area.innerHTML = `<div class="msg">この PVT は終わりました</div>`; res.appendChild(pvtSummaryEl(pvtRun.summary)); return wrap; }
+    showIdle();
+    let run = null;
+    const start = () => {
+      run = { step: st.id, len: cfgOf(S.meta).pvt * 60000, t0: performance.now(), wall0: Date.now(), trials: [], state: "wait", stimOn: 0, nextAt: 0, fbUntil: 0, done: false, raf: 0 };
+      pvtRun = run; log("pvt_start");
+      area.innerHTML = `<div class="rem" id="pvtRem"></div><div class="num" id="pvtNum"></div>`;
+      schedule(run.t0); loop();
+    };
+    const schedule = (from) => { run.state = "wait"; run.nextAt = from + 1000 + Math.random() * 3000; };
+    const loop = () => {
+      if (!run || run.done) return;
+      const now = performance.now();
+      const num = document.getElementById("pvtNum"), rem = document.getElementById("pvtRem");
+      if (!num) return;
+      const left = run.len - (now - run.t0);
+      rem.textContent = fmtMS(left / 1000);
+      if (left <= 0) return finish();
+      if (run.state === "wait") {
+        if (now >= run.nextAt) { run.state = "stim"; run.stimOn = 0; num.textContent = "0"; requestAnimationFrame((ts) => { if (run && run.state === "stim" && !run.stimOn) run.stimOn = ts; }); }
+        else if (now >= run.fbUntil) num.textContent = "";
+      } else if (run.state === "stim" && run.stimOn) {
+        const el = now - run.stimOn;
+        num.textContent = String(Math.floor(el));
+        if (el >= TIMEOUT) { record(run.stimOn, TIMEOUT, "timeout"); num.textContent = "時間切れ"; run.fbUntil = now + 1000; schedule(now); }
+      }
+      run.raf = requestAnimationFrame(loop);
+    };
+    const record = (onset, rt, type) => {
+      const isi = run.lastEnd ? onset - run.lastEnd : onset - run.t0;
+      run.trials.push({ n: run.trials.length + 1, t: run.wall0 + (onset - run.t0), isi: Math.round(isi), rt: rt == null ? null : Math.round(rt), type });
+      run.lastEnd = performance.now();
+    };
+    const respond = (ts) => {
+      if (!run) { start(); return; }
+      if (run.done) return;
+      const num = document.getElementById("pvtNum");
+      if (run.state === "stim" && run.stimOn) {
+        const rt = ts - run.stimOn;
+        const type = rt < FS ? "false_start" : rt >= LAPSE ? "lapse" : "valid";
+        record(run.stimOn, rt, type);
+        if (num) num.textContent = String(Math.round(rt));
+        run.fbUntil = ts + 1000; schedule(ts);
+      } else if (run.state === "wait") {
+        run.trials.push({ n: run.trials.length + 1, t: run.wall0 + (ts - run.t0), isi: null, rt: null, type: "false_start" });
+        if (num) num.textContent = "早すぎ";
+        run.fbUntil = ts + 800; schedule(ts);
+      }
+    };
+    const finish = () => {
+      run.done = true; cancelAnimationFrame(run.raf);
+      run.summary = pvtSummary(run.trials);
+      S.pvt = S.pvt.filter((b) => b.step !== run.step);
+      S.pvt.push({ step: run.step, startedAt: run.wall0, trials: run.trials, summary: run.summary });
+      log("pvt_end", `n=${run.summary.n};meanRT=${run.summary.meanRT};mean1RT=${run.summary.meanRecip};lapses=${run.summary.lapses};FS=${run.summary.fs}`);
+      area.innerHTML = `<div class="msg">終わりました</div>`;
+      res.innerHTML = ""; res.appendChild(pvtSummaryEl(run.summary));
+      chime("pvt"); refreshNext();
+    };
+    const evTime = (e) => (e.timeStamp && e.timeStamp > 1 && e.timeStamp < performance.now() + 1000 ? e.timeStamp : performance.now());
+    area.addEventListener("pointerdown", (e) => { e.preventDefault(); respond(evTime(e)); });
+    area.addEventListener("keydown", (e) => { if (e.code === "Space" || e.key === " ") { e.preventDefault(); if (!e.repeat) respond(evTime(e)); } });
+    setTimeout(() => area.focus({ preventScroll: true }), 50);
+    return wrap;
+  }
+  function pvtSummary(trials) {
+    const resp = trials.filter((t) => t.type === "valid" || t.type === "lapse");
+    const rts = resp.map((t) => t.rt).sort((a, b) => a - b);
+    const mean = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
+    const med = rts.length ? (rts.length % 2 ? rts[(rts.length - 1) / 2] : (rts[rts.length / 2 - 1] + rts[rts.length / 2]) / 2) : null;
+    const recip = rts.length ? rts.reduce((a, b) => a + 1000 / b, 0) / rts.length : null;
+    return {
+      n: resp.length, meanRT: mean == null ? null : Math.round(mean), medianRT: med == null ? null : Math.round(med),
+      meanRecip: recip == null ? null : Math.round(recip * 1000) / 1000,
+      lapses: trials.filter((t) => t.type === "lapse" || t.type === "timeout").length, fs: trials.filter((t) => t.type === "false_start").length,
+    };
+  }
+  function pvtSummaryEl(s) {
+    const d = document.createElement("div"); d.className = "summary";
+    d.innerHTML = `<div><span>反応数</span><b>${s.n}</b></div><div><span>平均反応時間</span><b>${s.meanRT ?? "—"} ms</b></div>
+      <div><span>中央値</span><b>${s.medianRT ?? "—"} ms</b></div><div><span>1/RT 平均</span><b>${s.meanRecip ?? "—"}</b></div>
+      <div><span>lapse（355 ms以上）</span><b>${s.lapses}</b></div><div><span>フライング</span><b>${s.fs}</b></div>`;
+    return d;
+  }
+
+  /* ---------- in-work KSS/VAS prompt + confirm dialog ---------- */
+  function openModal(build) { const m = $("modal"), c = $("modalCard"); c.innerHTML = ""; build(c); m.hidden = false; }
+  function closeModal() { $("modal").hidden = true; }
+  function openConfirm(text, onYes, yesLabel = "進む", danger = false) {
+    openModal((c) => {
+      c.innerHTML = `<p class="hint">${esc(text)}</p><div class="row" style="justify-content:flex-end"><button class="btn" id="mNo" type="button">やめる</button><button class="btn ${danger ? "btn-danger-solid" : "btn-primary"}" id="mYes" type="button">${esc(yesLabel)}</button></div>`;
+      $("mNo").addEventListener("click", closeModal);
+      $("mYes").addEventListener("click", () => { closeModal(); onYes(); });
+    });
+  }
+  function openWorkPrompt(m) {
+    const a = { kss: null, vas: null };
+    openModal((c) => {
+      c.innerHTML = `<div><span class="chip">作業 ${m}分</span><div class="stepname" style="font-size:22px">KSS・VAS</div></div>`;
+      const ok = document.createElement("button"); ok.type = "button"; ok.className = "btn btn-primary btn-big"; ok.textContent = "記録して作業に戻る"; ok.disabled = true;
+      const check = () => { ok.disabled = !(a.kss != null && a.vas != null); };
+      c.appendChild(kssBlock((v) => { a.kss = v; check(); }));
+      c.appendChild(vasBlock("精神的な疲労感", "まったく疲れていない", "これ以上ないほど疲れている", 0.1, (v) => { a.vas = v; check(); }));
+      const row = document.createElement("div"); row.className = "row"; row.style.justifyContent = "space-between";
+      const skip = document.createElement("button"); skip.type = "button"; skip.className = "btn btn-quiet"; skip.textContent = "今回は答えない";
+      row.appendChild(skip); row.appendChild(ok); c.appendChild(row);
+      ok.addEventListener("click", () => {
+        const v = { kind: "kv", kss: a.kss, vas: a.vas }; S.answers[`work${S.workRun}_${m}`] = v;
+        log("answer", `${m}分;` + answerSummary(v), "work"); closeModal(); markDone(m);
+      });
+      skip.addEventListener("click", () => { S.fired[`w${S.workRun}:${m}:skip`] = true; log("skip", `${m}分 KSS・VAS`, "work"); closeModal(); markDone(m); });
+    });
+  }
+  function markDone(m) { const el = document.querySelector(`.mark[data-m="${m}"]`); if (el) el.classList.add("done"); }
+
+  /* ---------- ticking ---------- */
+  function tick() {
+    const now = Date.now();
+    if (!S) { $("clock").innerHTML = `現在 <b>${clockHM(now)}</b>`; return; }
+    let h = `現在 <b>${clockHM(now)}</b><br>経過 ${fmtHMS((now - S.meta.startedAt) / 1000)}`;
+    if (S.workEnd) h += `<br>作業終了から ${fmtMS((now - S.workEnd) / 1000)}`;
+    else if (S.workStart) h += `<br>作業 ${fmtMS((now - S.workStart) / 1000)} / ${fmtMS(workTotal())}`;
+    $("clock").innerHTML = h;
+    if ($("run").hidden) return;
+    $("stSince").textContent = S.status === "通常" ? "" : `「${S.status}」 ${fmtMS((now - S.statusSince) / 1000)}`;
+    const st = steps[S.idx], started = stepStart(S.idx);
+    const se = $("stepElapsed"); if (se && started) se.textContent = `この手順 ${fmtMS((now - started) / 1000)}`;
+    const tMain = $("tMain"), bar = $("tBar"), banner = $("tBanner");
+    if (st.kind === "walk" && tMain) tMain.innerHTML = `${fmtMS((now - started) / 1000)}<small>経過</small>`;
+    if (st.kind === "rest" && tMain) {
+      const a = (S.adj && S.adj[st.id]) || 0;
+      const left = restLeft(st), total = st.target.dur ? st.target.dur + a : (st.target.sinceEnd + a - (started - S.workEnd) / 1000);
+      tMain.innerHTML = left > 0 ? `${fmtMS(left)}<small>${st.target.dur ? "残り" : `作業終了から${Math.round(((st.target.sinceEnd + a) / 60) * 10) / 10}分まで`}</small>` : `${fmtMS(-left)}<small>経過（時間になりました）</small>`;
+      tMain.classList.toggle("over", left <= 0);
+      const tp = $("tPlan"); if (tp) tp.innerHTML = `目標時刻 <b>${clockHM(now + left * 1000)}</b>`;
+      if (bar) bar.style.width = `${Math.min(100, Math.max(0, (1 - left / Math.max(1, total)) * 100))}%`;
+      if (left <= 0) {
+        if (banner) banner.innerHTML = `<div class="banner go">時間になりました。次へ進んでください</div>`;
+        const key = visitKey(st.id);
+        if (!S.fired[key]) { S.fired[key] = true; persist(); chime("rest"); }
+      }
+    }
+    if (st.kind === "work" && tMain && S.workStart) {
+      const el = (now - S.workStart) / 1000, total = workTotal();
+      tMain.innerHTML = el < total ? `${fmtMS(el)}<small>/ ${fmtMS(total)}</small>` : `${fmtMS(el)}<small>（目標の ${fmtMS(total)} を過ぎました）</small>`;
+      tMain.classList.toggle("over", el >= total);
+      const tp = $("tPlan");
+      if (tp) {
+        const nm = st.marks.find((m) => m * 60 > el && m * 60 < total);
+        const capLabel = S.meta.load === "高" ? "上限時刻" : "目標終了時刻";
+        tp.innerHTML = (nm ? `次の KSS・VAS <b>${clockHM(S.workStart + nm * 60000)}</b>　` : "") + `${capLabel} <b>${clockHM(S.workStart + total * 1000)}</b>`;
+      }
+      if (bar) bar.style.width = `${Math.min(100, (el / total) * 100)}%`;
+      st.marks.forEach((m) => {
+        const key = `w${S.workRun}:${m}`;
+        if (S.answers[`work${S.workRun}_${m}`] || S.fired[`${key}:skip`]) markDone(m);
+        if (el >= m * 60 && !S.fired[key]) { S.fired[key] = true; persist(); chime("kv"); openWorkPrompt(m); }
+      });
+      if (el >= total) {
+        if (banner) banner.innerHTML = S.meta.load === "高"
+          ? `<div class="banner go">上限の${cfgOf(S.meta).maxWork}分になりました。作業を止めて「疲れた→終了」を押してください</div>`
+          : `<div class="banner go">目標の時間になりました。作業を止めて「作業終了 → 次へ」を押してください</div>`;
+        const key = `w${S.workRun}:end`;
+        if (!S.fired[key]) { S.fired[key] = true; persist(); chime("end"); }
+      }
+    }
+  }
+  setInterval(tick, 250);
+
+  /* ---------- export ---------- */
+  function csvCell(v) { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+  function buildCsv(st, which) {
+    const m = st.meta, head = [m.sessionId, m.subject, m.blocks || 1, m.load, m.rep, cfgOf(m).brk];
+    let rows;
+    if (which === "events") {
+      rows = [["session_id", "subject", "blocks", "load", "rep", "break_min", "index", "time_local", "elapsed_s", "since_work_end_s", "step_id", "step_name", "event", "value"]];
+      st.events.forEach((e) => rows.push([...head, e.i, localISO(e.t), ((e.t - m.startedAt) / 1000).toFixed(1), st.workEnd ? ((e.t - st.workEnd) / 1000).toFixed(1) : "", e.step, e.name, e.ev, e.val]));
+    } else {
+      rows = [["session_id", "subject", "blocks", "load", "rep", "break_min", "pvt_step", "trial", "time_local", "isi_ms", "rt_ms", "type"]];
+      st.pvt.forEach((b) => b.trials.forEach((t) => rows.push([...head, b.step, t.n, localISO(t.t), t.isi ?? "", t.rt ?? "", t.type])));
+    }
+    return "﻿" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+  }
+  async function exportCsv(st, which) {
+    const d = new Date(st.meta.startedAt);
+    const name = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${st.meta.subject}_${st.meta.blocks || 1}blk_${st.meta.load === "高" ? "high" : "low"}_brk${cfgOf(st.meta).brk}_${st.meta.rep}_${which === "events" ? "steps" : "pvt"}.csv`.replace(/[\\/:*?"<>|\s]/g, "_");
+    const data = buildCsv(st, which);
+    if (downloads) {
+      try { await downloads.save({ filename: name, data }); return; }
+      catch (e) { if (e && e.code === "declined") return; }
+    }
+    try {
+      const blob = new Blob([data], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return;
+    } catch (e) { /* very old browser: fall back to copy-paste below */ }
+    openModal((c) => {
+      c.innerHTML = `<h2>${esc(name)}</h2><p class="note" style="margin:0">この表示ではファイル保存が使えないため，内容をコピーしてテキストファイルに貼り付けてください。</p><textarea class="out" readonly></textarea><div class="row" style="justify-content:flex-end"><button class="btn" id="mCopy" type="button">コピー</button><button class="btn btn-primary" id="mClose" type="button">閉じる</button></div>`;
+      const ta = c.querySelector("textarea"); ta.value = data.replace(/^﻿/, "");
+      $("mCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText(ta.value); $("mCopy").textContent = "コピーしました"; } catch { ta.select(); } });
+      $("mClose").addEventListener("click", closeModal);
+    });
+  }
+
+  /* ---------- experimenter mode ---------- */
+  const bExp = $("bExp");
+  let holdTimer = null, justOn = false;
+  function setExpert(on) { expert = on; bExp.setAttribute("aria-pressed", String(on)); const sk = $("bSkip"); if (sk) sk.hidden = !on; if (S) { renderSteps(); renderExpert(); } }
+  bExp.addEventListener("pointerdown", () => {
+    if (expert) return;
+    bExp.classList.add("pressing");
+    holdTimer = setTimeout(() => { bExp.classList.remove("pressing"); justOn = true; setExpert(true); }, 800);
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => bExp.addEventListener(ev, () => { clearTimeout(holdTimer); bExp.classList.remove("pressing"); }));
+  bExp.addEventListener("click", (e) => {
+    if (justOn) { justOn = false; return; }
+    if (expert) { setExpert(false); return; }
+    if (e.detail === 0) openConfirm("実験者モードにします。手順の移動や時刻の修正ができるようになります。", () => setExpert(true));
+  });
+
+  function renderExpert() {
+    const p = $("exPanel");
+    if (!S || !expert) { p.hidden = true; return; }
+    p.hidden = false;
+    const st = steps[S.idx], started = stepStart(S.idx);
+    const step = (d) => `${d > 0 ? "+" : "−"}${Math.abs(d) >= 60 ? Math.abs(d) / 60 + "分" : Math.abs(d) + "秒"}`;
+    const fixRow = (label, key, t) => `<div class="ex-row"><span>${label}</span><div class="row"><span class="val">${t ? clockHM(t) : "—"}</span>${t ? [-60, -10, 10, 60].map((d) => `<button class="btn btn-sm" type="button" data-fix="${key}" data-d="${d}">${step(d)}</button>`).join("") + `<button class="btn btn-sm" type="button" data-set="${key}">時刻を指定</button>` : ""}</div></div>`;
+    const rows = [
+      `<div class="row" style="justify-content:space-between"><h2>実験者モード</h2><button class="btn btn-sm" type="button" id="exClose">閉じる</button></div>`,
+      `<p class="note" style="margin:0">「この手順をスキップ」で今の手順を飛ばして次へ進みます（回答がなくても進めます）。左の手順一覧を押すと，その手順へ直接移動します。スキップ・移動・時刻の修正・目標時間の変更は，すべて記録（CSV）に残ります。</p>`,
+      fixRow(`開始：${esc(st.name)}`, "step", started),
+    ];
+    if (S.workStart && st.kind !== "work") rows.push(fixRow("作業開始", "workStart", S.workStart));
+    if (S.workEnd) rows.push(fixRow("作業終了", "workEnd", S.workEnd));
+    if (st.kind === "rest" || st.kind === "work") {
+      const a = (S.adj && S.adj[st.id]) || 0;
+      rows.push(`<div class="ex-row"><span>目標時間</span><div class="row"><span class="val">${a ? (a > 0 ? "+" : "−") + fmtMS(Math.abs(a)) : "±0"}</span>${[-60, 60, 300].map((d) => `<button class="btn btn-sm" type="button" data-adj="${d}">${step(d)}</button>`).join("")}</div></div>`);
+    }
+    rows.push(`<div class="row"><button class="btn btn-sm" type="button" id="exEnd" ${S.finished ? "disabled" : ""}>実験を中止する（この回を終了）</button></div>`);
+    p.innerHTML = rows.join("");
+    $("exClose").addEventListener("click", () => setExpert(false));
+    p.querySelectorAll("[data-fix]").forEach((b) => b.addEventListener("click", () => { const t = timeOf(b.dataset.fix); if (t) applyTime(b.dataset.fix, t + (+b.dataset.d) * 1000, step(+b.dataset.d)); }));
+    p.querySelectorAll("[data-set]").forEach((b) => b.addEventListener("click", () => askTime(b.dataset.set)));
+    p.querySelectorAll("[data-adj]").forEach((b) => b.addEventListener("click", () => adjTarget(+b.dataset.adj)));
+    $("exEnd").addEventListener("click", () => openConfirm("実験を中止して，この回を終了します。スキップとは違い，残りの手順はすべて行いません。中止も記録に残ります。", () => { log("abort", `「${steps[S.idx].name}」で終了`); jumpTo(steps.length - 1, "途中終了"); }));
+  }
+  const timeOf = (key) => (key === "step" ? stepStart(S.idx) : S[key]);
+  function applyTime(key, t, how) {
+    const old = timeOf(key); if (!old) return;
+    const st = steps[S.idx];
+    const label = key === "step" ? `「${st.name}」の開始` : key === "workStart" ? "作業開始" : "作業終了";
+    if (key === "step") {
+      S.events.push({ i: S.events.length + 1, t, step: st.id, name: st.name, ev: "start", val: "時刻修正" });
+      if (st.kind === "work") S.workStart = t;
+    } else S[key] = t;
+    log("fix", `${label} ${clockHM(old)} → ${clockHM(t)}（${how}）`);
+    renderSteps(); renderStep();
+  }
+  function askTime(key) {
+    const old = timeOf(key); if (!old) return;
+    const d = new Date(old);
+    openModal((c) => {
+      c.innerHTML = `<h2>時刻を指定</h2><label class="fld">時:分:秒<input type="time" step="1" id="mTime" value="${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}" style="font:inherit;font-size:18px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></label>
+        <div class="row" style="justify-content:flex-end"><button class="btn" id="mNo" type="button">やめる</button><button class="btn btn-primary" id="mYes" type="button">この時刻にする</button></div>`;
+      $("mNo").addEventListener("click", closeModal);
+      $("mYes").addEventListener("click", () => {
+        const [hh, mm, ss] = ($("mTime").value || "").split(":").map((x) => parseInt(x, 10));
+        if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
+        const nd = new Date(old); nd.setHours(hh, mm, Number.isFinite(ss) ? ss : 0, 0);
+        closeModal(); applyTime(key, nd.getTime(), "指定");
+      });
+    });
+  }
+  function adjTarget(d) {
+    const st = steps[S.idx];
+    S.adj = S.adj || {};
+    S.adj[st.id] = (S.adj[st.id] || 0) + d;
+    if (d > 0) { delete S.fired[visitKey(st.id)]; if (st.kind === "work") delete S.fired[`w${S.workRun}:end`]; }
+    const a = S.adj[st.id];
+    log("fix", `目標時間 ${d > 0 ? "+" : "−"}${Math.abs(d) / 60}分（変更の合計 ${a >= 0 ? "+" : "−"}${fmtMS(Math.abs(a))}）`);
+    renderStep();
+  }
+  function confirmJump(i) {
+    if (i === S.idx) return;
+    openConfirm(`「${steps[i].name}」へ移動します。移動は記録に残ります。`, () => jumpTo(i));
+  }
+  function jumpTo(i, note = "移動") {
+    const from = steps[S.idx], to = steps[i], now = Date.now();
+    if (to.kind === "work") {
+      S.workStart = now; S.workEnd = null; S.workRun = (S.workRun || 0) + 1;
+    } else {
+      let w = i; while (w >= 0 && steps[w].kind !== "work") w--;
+      if (w < 0) { S.workStart = null; S.workEnd = null; }
+      else if (!S.workStart) {
+        S.workStart = now; S.workEnd = now; S.workRun = (S.workRun || 0) + 1;
+        S.blockDur = S.blockDur || {}; S.blockDur[steps[w].block] = 0;
+      } else if (!S.workEnd) {
+        S.workEnd = now;
+        S.blockDur = S.blockDur || {}; S.blockDur[steps[w].block] = Math.round((S.workEnd - S.workStart) / 1000);
+      }
+    }
+    log("jump", `${from.name} → ${to.name}`);
+    S.finished = to.kind === "end";
+    S.idx = i; pvtRun = null;
+    enter(note);
+    if (to.kind === "work") chime("start");
+    if (S.finished) archiveDone();
+    renderSteps(); renderStep();
+  }
+
+  /* ---------- history ---------- */
+  let remoteSessions = null;
+  function archiveDone() {
+    if (deletedIds.has(S.meta.sessionId)) return;
+    if (S.meta.load === "高" && S.blockDur && Object.keys(S.blockDur).length) {
+      try { localStorage.setItem(`fatigueRec.highBlocks.${S.meta.subject}`, JSON.stringify(S.blockDur)); } catch { /* storage unavailable */ }
+    }
+    const list = lsGet(LS_DONE) || [];
+    const i = list.findIndex((x) => x.meta.sessionId === S.meta.sessionId);
+    if (i >= 0) list[i] = S; else list.unshift(S);
+    lsSet(LS_DONE, list.slice(0, 30));
+    lsDel(LS_CUR);
+    renderHistory();
+  }
+  function renderHistory() {
+    const local = lsGet(LS_DONE) || [];
+    const map = new Map();
+    local.forEach((s) => map.set(s.meta.sessionId, s));
+    (remoteSessions || []).forEach((s) => map.set(s.meta.sessionId, s));
+    const list = [...map.values()].sort((a, b) => b.meta.startedAt - a.meta.startedAt);
+    const tb = $("histBody"); tb.innerHTML = "";
+    if (!list.length) {
+      tb.innerHTML = `<tr><td colspan="7" style="color:var(--muted)">まだ記録はありません。上の「記録開始」から1回分を記録すると，ここに並びます。</td></tr>`;
+    }
+    list.slice(0, 60).forEach((s) => {
+      const d = new Date(s.meta.startedAt);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="mono">${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}</td>
+        <td>${esc(s.meta.subject)}</td><td>${s.meta.blocks || 1}ブロック・${esc(s.meta.load)}負荷・休憩${cfgOf(s.meta).brk}分</td><td class="mono">${s.meta.rep}</td>
+        <td><span class="pill ${s.finished ? "ok" : ""}">${s.finished ? "完了" : "途中"}</span></td>
+        <td><button class="btn" type="button" data-w="events">手順・回答</button> <button class="btn" type="button" data-w="pvt">PVT</button></td>
+        <td><button class="btn btn-sm btn-danger" type="button" data-del="1">削除</button></td>`;
+      tr.querySelectorAll("button[data-w]").forEach((b) => b.addEventListener("click", () => exportCsv(s, b.dataset.w)));
+      tr.querySelector("button[data-del]").addEventListener("click", () => askDelete(s));
+      tb.appendChild(tr);
+    });
+    $("histNote").textContent = "記録はこのブラウザー内に保存されます。終了後は CSV を保存してください。";
+  }
+
+  function askDelete(s) {
+    const id = s.meta.sessionId;
+    if (S && S.meta.sessionId === id && !S.finished && !$("run").hidden) { toast("実行中の回は削除できません"); return; }
+    const d = new Date(s.meta.startedAt);
+    const when = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const where = db ? "共有の保存先とこの端末の両方から消え，" : "この端末から消え，";
+    openConfirm(`被験者 ${s.meta.subject}・${when} 開始・${s.meta.blocks || 1}ブロック・${s.meta.load}負荷・${s.meta.rep}回目 の記録を削除します。${where}元に戻せません。必要なら先に CSV を保存してください。`,
+      () => deleteSession(id), "削除する", true);
+  }
+  async function deleteSession(id) {
+    clearTimeout(saveTimer);
+    deletedIds.add(id);
+    if (db) {
+      try { await db.doc(`sessions/${id}`).delete(); }
+      catch (e) { deletedIds.delete(id); toast("削除できませんでした（保存先への書き込み権限がありません）"); return; }
+      remoteSessions = (remoteSessions || []).filter((x) => x.meta.sessionId !== id);
+    }
+    lsSet(LS_DONE, (lsGet(LS_DONE) || []).filter((x) => x.meta.sessionId !== id));
+    const cur = lsGet(LS_CUR);
+    if (cur && cur.meta && cur.meta.sessionId === id) { lsDel(LS_CUR); $("resume").hidden = true; }
+    renderHistory();
+    toast("記録を削除しました");
+  }
+
+  /* ---------- standalone local storage ---------- */
+  setDbState("端末内に保存");
+
+  /* ---------- boot: resume an unfinished session ---------- */
+  const saved = lsGet(LS_CUR);
+  if (saved && saved.meta && !saved.finished) {
+    const st = buildSteps(saved.meta)[saved.idx];
+    $("resume").hidden = false;
+    $("resumeText").textContent = `被験者 ${saved.meta.subject}・${saved.meta.blocks || 1}ブロック・${saved.meta.load}負荷・${saved.meta.rep}回目（${new Date(saved.meta.startedAt).toLocaleString("ja-JP")} 開始）。いまの手順は「${st ? st.name : "?"}」です。`;
+    $("bResume").addEventListener("click", () => { S = saved; S.visit = S.visit || {}; S.adj = S.adj || {}; S.workRun = S.workRun || 0; S.blockDur = S.blockDur || {}; steps = buildSteps(S.meta); initAudio(); keepAwake(); log("resume"); showRun(); });
+    $("bDiscard").addEventListener("click", () => { lsDel(LS_CUR); $("resume").hidden = true; });
+  }
+  renderHistory();
+})();
+</script>
+
+</body></html>
